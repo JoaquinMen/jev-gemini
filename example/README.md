@@ -339,15 +339,3 @@ Select the single best letter (A, B, C, D, E):
 - **`is_bimodal`**: `False` (mass is concentrated on adjacent levels `0` and `1`, not split across non-adjacent extremes)
 
 ---
-
-## Running the 3 Examples (`example/run_examples.py`)
-
-You can run all three single-case benchmark examples (`noul_01`, `choice_01`, `score_05`) directly:
-
-```bash
-# Simulated mode (no GCP credentials needed):
-python3 example/run_examples.py
-
-# Live Vertex AI mode (e.g., gemini-2.5-flash with logprobs or gemini-3.5-flash-lite with monte_carlo):
-python3 example/run_examples.py --live --project=flex-hr-chatbot --location=global --model=gemini-2.5-flash --mode=logprobs
-```
