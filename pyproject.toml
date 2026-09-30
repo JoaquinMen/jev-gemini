@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-gemini"
+version = "0.1.0"
+description = "Calibrated System-One decision primitives (Noul, Choice, Score) on Gemini Flash via Vertex AI and google-genai."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "joaquinmen"}
+]
+dependencies = [
+  "google-genai>=1.0.0",
+  "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+langchain = [
+  "langchain-core>=0.2.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["jev_gemini*"]
