@@ -119,9 +119,24 @@ mc_client = GeminiSystemOneClient(
 )
 ```
 
-## Running Unit Tests
+### 3. Statistical Trade-offs: `mode="logprobs"` vs. `mode="monte_carlo"`
+
+`mode="monte_carlo"` is an empirical sampling workaround ($\hat{p}_k = c_k / N$ with $N=8$ candidates) rather than a direct readout of the model's exact softmax distribution (`mode="logprobs"`):
+
+- **Resolution & Sampling Variance**: `mode="logprobs"` is **deterministic** ($\text{SE} = 0$) with continuous probability precision and preserves small tail probabilities ($p < 0.125$). `mode="monte_carlo"` ($N=8$) quantizes probabilities into steps of $1/8 = 0.125$ with binomial standard error $\text{SE}(\hat{p}_k) = \sqrt{p_k(1-p_k)/8}$ (up to $\pm 0.177$ at $p=0.5$), causing tail probabilities ($p < 0.125$) to clip to `0.0` unless `monte_carlo_smoothing > 0` is enabled.
+- **Which Approach to Choose**:
+  - **Prefer `gemini-2.5-flash` with `mode="logprobs"` (Best for Calibration)** when you need exact, deterministic confidence calibration, smooth continuous `Score` expected values, or tight `abstain_band` thresholds.
+  - **Use `gemini-3.5-flash-lite` or `gemini-3.8-flash` with `mode="monte_carlo"` (Best for Gemini 3 Reasoning)** when you need Gemini 3's stronger reasoning on standard GCP projects; top-1 decision accuracy is identical (`100%` on our 60-case benchmark), and `gemini-3.5-flash-lite` matches `2.5-flash` in both latency (`~1.0s`) and cost (`$0.08` vs `$0.06` per 1,000 calls).
+
+## Running Unit Tests & Benchmarks
+
+See [`benchmark/BENCHMARK_REPORT.md`](benchmark/BENCHMARK_REPORT.md) for the full 60-example evaluation report comparing accuracy, latency, token pricing, and statistical calibration across Gemini 2.5 (`mode="logprobs"`) and Gemini 3.x (`mode="monte_carlo"`).
 
 ```bash
+# Run unit tests:
 python3 -m unittest discover -s tests -p "test_*.py" -v
+
+# Run the 60-example benchmark (20 NoulTest, 20 ChoiceTest, 20 ScoreTest):
+python3 benchmark/run_benchmark.py --project=YOUR_GCP_PROJECT --location=global
 ```
 
