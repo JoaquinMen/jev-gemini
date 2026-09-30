@@ -81,6 +81,24 @@ print(resp["urgency"].score, resp["urgency"].confidence, resp["urgency"].is_bimo
 
 ---
 
+## Supported Models & Vertex AI Allowlisting
+
+### 1. Out-of-the-Box Supported Models (All GCP Projects)
+
+On Vertex AI (`location="global"` or regional endpoints), two current models support `response_logprobs=True` + `response_mime_type="text/x.enum"` with zero-thinking single-step decoding out of the box:
+
+| Model ID | Recommended Use Case | Notes |
+| :--- | :--- | :--- |
+| **`gemini-2.5-flash`** *(Default)* | Primary System-One classifier (`Noul`, `Choice`, `Score`) | Automatically configured with `thinking_budget=0` for single-step logprob extraction. |
+| **`gemini-2.5-flash-lite`** | Ultra-low-latency, high-throughput routing & guardrails | Fastest and lowest-cost model; `default_thinking_on=false` natively. |
+
+> [!NOTE]
+> **Why `-pro` models (`gemini-2.5-pro`, `gemini-3.1-pro-preview`) are not used**: Vertex AI enforces `thinking_always_on = true` (`thinking_budget >= 128`) on Pro models, rejecting `thinking_budget=0` / `thinking_level="MINIMAL"`. Because they generate internal chain-of-thought tokens prior to emitting the enum token, they act as multi-step "System Two" reasoners rather than single-step "System One" classifiers.
+
+### 2. Using Newer Gemini 3.x Models (`3.5`, `3.7`, `3.8`)
+
+Enabling GCP projects for logprobs is not supported yet for Gemini 3 models.
+
 ## Running Unit Tests
 
 ```bash
