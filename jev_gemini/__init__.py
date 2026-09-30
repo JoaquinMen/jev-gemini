@@ -11,6 +11,7 @@ from jev_gemini.calibration import normalized_shannon_entropy
 from jev_gemini.client import GeminiSystemOneClient
 from jev_gemini.client import UnsupportedBackendError
 from jev_gemini.extractor import extract_decision_step_distribution
+from jev_gemini.extractor import extract_monte_carlo_distribution
 from jev_gemini.extractor import ExtractedStepResult
 from jev_gemini.extractor import MissingLogprobsError
 from jev_gemini.extractor import ThoughtTruncationError
@@ -51,6 +52,7 @@ __all__ = [
     "compute_score_metrics",
     "evaluate_calibration",
     "extract_decision_step_distribution",
+    "extract_monte_carlo_distribution",
     "fit_temperature",
     "jensen_shannon_divergence",
     "normalized_shannon_entropy",

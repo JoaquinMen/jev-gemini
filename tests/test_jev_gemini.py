@@ -12,6 +12,7 @@ from jev_gemini import Choice
 from jev_gemini import ChoiceAnswer
 from jev_gemini import compute_score_metrics
 from jev_gemini import extract_decision_step_distribution
+from jev_gemini import extract_monte_carlo_distribution
 from jev_gemini import fit_temperature
 from jev_gemini import GeminiJevClassifier
 from jev_gemini import GeminiSystemOneClient
@@ -28,7 +29,7 @@ from jev_gemini.extractor import CTRL95_END_THOUGHT
 
 
 def build_synthetic_response(
-    steps: Sequence[ tuple[str, float, Mapping[str, float]] ],
+    steps: Sequence[tuple[str, float, Mapping[str, float]]],
 ) -> Any:
   """Constructs a synthetic `GenerateContentResponse` with `LogprobsResult`."""
   chosen = []
@@ -60,6 +61,28 @@ def build_synthetic_response(
           )
       ]
   )
+
+
+def build_monte_carlo_response(
+    sampled_symbols: Sequence[str],
+    *,
+    include_thought_parts: bool = False,
+) -> Any:
+  """Constructs a synthetic multi-candidate `GenerateContentResponse` without logprobs."""
+  candidates = []
+  for sym in sampled_symbols:
+    parts = []
+    if include_thought_parts:
+      parts.append(types.Part(text="Thinking about options...", thought=True))
+    parts.append(types.Part.from_text(text=sym))
+    candidates.append(
+        types.Candidate(
+            content=types.Content(role="model", parts=parts),
+            logprobs_result=None,
+            finish_reason="STOP",
+        )
+    )
+  return types.GenerateContentResponse(candidates=candidates)
 
 
 class FakeVertexGenAIClient:
@@ -334,6 +357,163 @@ class ClientAndPrimitivesTest(unittest.TestCase):
     out_state = classifier.invoke({"message": "Database offline"})
     self.assertIn("jev_out", out_state)
     self.assertEqual(out_state["jev_out"]["priority"].choice, "HIGH")
+
+
+class MonteCarloModeTest(unittest.TestCase):
+  """Tests for `mode="monte_carlo"` (`candidate_count=8` empirical sampling)."""
+
+  def test_extract_monte_carlo_distribution_ignores_thought_parts_and_counts_candidates(
+      self,
+  ) -> None:
+    response = build_monte_carlo_response(
+        ["A", "A", "A", "A", "A", "A", "B", "B"],
+        include_thought_parts=True,
+    )
+    res = extract_monte_carlo_distribution(response, ["A", "B", "C"])
+    self.assertEqual(res.thought_tokens_stripped, 8)
+    self.assertEqual(res.total_decoding_steps, 8)
+    self.assertAlmostEqual(res.symbol_linear_probs["A"], 6.0 / 8.0, places=6)
+    self.assertAlmostEqual(res.symbol_linear_probs["B"], 2.0 / 8.0, places=6)
+    self.assertAlmostEqual(res.symbol_linear_probs["C"], 0.0, places=6)
+    self.assertEqual(res.unobserved_symbols, ["C"])
+    self.assertAlmostEqual(res.matched_enum_mass, 1.0, places=6)
+
+  def test_extract_monte_carlo_distribution_applies_dirichlet_smoothing(
+      self,
+  ) -> None:
+    response = build_monte_carlo_response(["A"] * 8)
+    res = extract_monte_carlo_distribution(
+        response, ["A", "B"], smoothing_alpha=0.5
+    )
+    # With N=8, K=2, alpha=0.5: P(A) = (8 + 0.5) / (8 + 1.0) = 8.5 / 9.0
+    self.assertAlmostEqual(res.symbol_linear_probs["A"], 8.5 / 9.0, places=6)
+    self.assertAlmostEqual(res.symbol_linear_probs["B"], 0.5 / 9.0, places=6)
+    self.assertEqual(res.unobserved_symbols, ["B"])
+
+  def test_monte_carlo_client_evaluates_noul_choice_and_score_across_3x_models(
+      self,
+  ) -> None:
+    def mc_handler(prompt: str, cfg: Any) -> Any:
+      del cfg
+      if "QUESTION (NOUL)" in prompt:
+        # 6/8 True ("A"), 2/8 False ("B") -> 0.75
+        return build_monte_carlo_response(
+            ["A", "A", "A", "A", "A", "A", "B", "B"],
+            include_thought_parts=True,
+        )
+      if "QUESTION (SCORE)" in prompt:
+        # 4/8 level C (2.0), 4/8 level D (3.0) -> expected score = 2.5
+        return build_monte_carlo_response(
+            ["C", "C", "C", "C", "D", "D", "D", "D"],
+            include_thought_parts=True,
+        )
+      # Choice: 7/8 option A, 1/8 option B
+      return build_monte_carlo_response(
+          ["A", "A", "A", "A", "A", "A", "A", "B"],
+          include_thought_parts=True,
+      )
+
+    fake = FakeVertexGenAIClient(mc_handler)
+    client_38 = GeminiSystemOneClient(
+        model="gemini-3.8-flash",
+        mode="monte_carlo",
+        monte_carlo_samples=8,
+        genai_client=fake,
+    )
+    resp = client_38.ask(
+        state={"incident": "Intermittent 502 errors on API gateway"},
+        questions={
+            "is_outage": Noul(question="Is this an active outage?"),
+            "team": Choice(
+                question="Route to which team?",
+                options={"sre": "Site Reliability", "billing": "Billing"},
+            ),
+            "severity": Score(
+                question="Rate severity",
+                criteria=["0-Info", "1-Low", "2-Medium", "3-High", "4-Crit"],
+            ),
+        },
+    )
+
+    # Verify config omits response_logprobs and sets candidate_count=8, temperature=1.0
+    cfg = fake.configs[0]
+    self.assertIsNone(cfg.response_logprobs)
+    self.assertIsNone(cfg.logprobs)
+    self.assertEqual(cfg.candidate_count, 8)
+    self.assertEqual(cfg.temperature, 1.0)
+    # Verify gemini-3.8-flash selects thinking_level="LOW" and max_output_tokens >= 256
+    self.assertEqual(cfg.thinking_config.thinking_level, "LOW")
+    self.assertGreaterEqual(cfg.max_output_tokens, 256)
+
+    # Verify gemini-3.5-flash-lite selects thinking_level="MINIMAL" and max_output_tokens=16
+    client_35 = GeminiSystemOneClient(
+        model="gemini-3.5-flash-lite",
+        mode="monte_carlo",
+        genai_client=fake,
+    )
+    _ = client_35.evaluate_one(
+        state="Test", question=Noul(question="Is this a test?")
+    )
+    cfg_35 = fake.configs[-1]
+    self.assertEqual(cfg_35.thinking_config.thinking_level, "MINIMAL")
+    self.assertEqual(cfg_35.max_output_tokens, 16)
+
+    # Verify Noul, Choice, and Score outputs
+    noul_ans = resp["is_outage"]
+    assert isinstance(noul_ans, NoulAnswer)
+    self.assertTrue(noul_ans.value)
+    self.assertAlmostEqual(noul_ans.probability, 0.75, places=5)
+
+    choice_ans = resp["team"]
+    assert isinstance(choice_ans, ChoiceAnswer)
+    self.assertEqual(choice_ans.choice, "sre")
+    self.assertAlmostEqual(choice_ans.probabilities["sre"], 0.875, places=5)
+    self.assertAlmostEqual(choice_ans.probabilities["billing"], 0.125, places=5)
+
+    score_ans = resp["severity"]
+    assert isinstance(score_ans, ScoreAnswer)
+    self.assertAlmostEqual(score_ans.score, 2.5, places=5)
+    self.assertFalse(score_ans.is_bimodal)
+
+  def test_validates_monte_carlo_parameters(self) -> None:
+    with self.assertRaises(ValueError):
+      GeminiSystemOneClient(mode="invalid_mode")  # type: ignore[arg-type]
+    with self.assertRaises(ValueError):
+      GeminiSystemOneClient(mode="monte_carlo", monte_carlo_samples=0)
+    with self.assertRaises(ValueError):
+      GeminiSystemOneClient(mode="monte_carlo", monte_carlo_samples=9)
+    with self.assertRaises(ValueError):
+      GeminiSystemOneClient(mode="monte_carlo", monte_carlo_smoothing=-0.1)
+
+
+class BenchmarkSuiteTest(unittest.TestCase):
+  """Tests for `benchmark.dataset` (20 Noul, 20 Choice, 20 Score) and runner."""
+
+  def test_benchmark_datasets_have_20_examples_each_and_run_cleanly(self) -> None:
+    from benchmark import CHOICE_BENCHMARK
+    from benchmark import NOUL_BENCHMARK
+    from benchmark import SCORE_BENCHMARK
+    from benchmark.run_benchmark import evaluate_model_on_benchmarks
+
+    self.assertEqual(len(NOUL_BENCHMARK), 20)
+    self.assertEqual(len(CHOICE_BENCHMARK), 20)
+    self.assertEqual(len(SCORE_BENCHMARK), 20)
+
+    fake = FakeVertexGenAIClient(
+        lambda prompt, cfg: build_monte_carlo_response(["A"] * 8)
+    )
+    res = evaluate_model_on_benchmarks(
+        model="gemini-3.5-flash-lite",
+        mode="monte_carlo",
+        project="test-project",
+        location="global",
+        intra_primitive_workers=1,
+        genai_client=fake,
+    )
+    self.assertEqual(res["overall"]["total_examples"], 60)
+    self.assertEqual(res["noul"]["num_examples"], 20)
+    self.assertEqual(res["choice"]["num_examples"], 20)
+    self.assertEqual(res["score"]["num_examples"], 20)
 
 
 if __name__ == "__main__":

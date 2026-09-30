@@ -8,7 +8,7 @@ from concurrent import futures
 import enum
 import math
 import time
-from typing import Any
+from typing import Any, Literal
 
 from jev_gemini._types_compat import genai
 from jev_gemini._types_compat import HAS_GOOGLE_GENAI
@@ -24,6 +24,7 @@ from jev_gemini.compiler import compile_primitive_prompt
 from jev_gemini.compiler import CompiledPrompt
 from jev_gemini.compiler import DEFAULT_SYSTEM_INSTRUCTION
 from jev_gemini.extractor import extract_decision_step_distribution
+from jev_gemini.extractor import extract_monte_carlo_distribution
 from jev_gemini.extractor import ExtractedStepResult
 from jev_gemini.primitives import Choice
 from jev_gemini.primitives import JSONContent
@@ -45,9 +46,13 @@ class UnsupportedBackendError(ValueError):
 class GeminiSystemOneClient:
   """Evaluates calibrated Jev primitives (`Noul`, `Choice`, `Score`) on Vertex AI.
 
-  Uses constrained enum decoding (`response_mime_type="text/x.enum"`),
-  `response_logprobs=True`, and `max_output_tokens=5` with zero/minimal
-  thinking on Gemini Flash via the `google-genai` SDK (`vertexai=True`).
+  Supports two estimation modes:
+    - `mode="logprobs"` (default): Exact single-step token logprobs via
+      `response_logprobs=True` + `response_mime_type="text/x.enum"`.
+    - `mode="monte_carlo"`: Multi-candidate empirical sampling via
+      `candidate_count=N` + `response_mime_type="text/x.enum"` (enables
+      `gemini-3.5-flash-lite`, `gemini-3.7-flash`, and `gemini-3.8-flash` on
+      projects without `logprobs_allowlist.gcl`).
   """
 
   def __init__(
@@ -55,9 +60,12 @@ class GeminiSystemOneClient:
       *,
       model: str = "gemini-2.5-flash",
       project: str | None = None,
-      location: str = "us-central1",
+      location: str = "global",
       vertexai: bool = True,
-      default_temperature: float = 2.0,
+      mode: Literal["logprobs", "monte_carlo"] = "logprobs",
+      monte_carlo_samples: int = 8,
+      monte_carlo_smoothing: float = 0.0,
+      default_temperature: float | None = None,
       min_mass_threshold: float = 0.80,
       max_output_tokens: int = 5,
       system_instruction: str = DEFAULT_SYSTEM_INSTRUCTION,
@@ -70,17 +78,24 @@ class GeminiSystemOneClient:
     Args:
       model: Vertex AI Gemini model ID (default `"gemini-2.5-flash"`).
       project: Google Cloud project ID for Vertex AI.
-      location: Google Cloud region (default `"us-central1"`).
+      location: Google Cloud region (default `"global"`).
       vertexai: Must be `True` (public AI Studio API does not support
-        `response_logprobs=True`).
+        `response_logprobs=True` or `candidate_count` on Vertex models).
+      mode: Probability estimation strategy (`"logprobs"` or `"monte_carlo"`).
+      monte_carlo_samples: Number of parallel candidates `N` in `[1, 8]` to
+        sample per call when `mode="monte_carlo"` (`default = 8`).
+      monte_carlo_smoothing: Non-negative Dirichlet/Jeffreys prior `alpha >= 0`
+        applied to candidate counts when `mode="monte_carlo"` (`default = 0.0`).
       default_temperature: Default post-hoc calibration temperature `T > 0`.
+        Defaults to `2.0` when `mode="logprobs"` and `1.0` when
+        `mode="monte_carlo"`.
       min_mass_threshold: Minimum matched enum mass at the selected decoding
         step (`default = 0.80`).
       max_output_tokens: Output token budget (`>= 5` required to accommodate
         Gemini 3's 4-token `<ctrl94>thought\n<ctrl95>` header).
       system_instruction: System instruction for System-One evaluation.
       allow_text_fallback: Whether to degrade gracefully if `logprobs_result`
-        is absent.
+        is absent in `mode="logprobs"`.
       hierarchical_top_buckets: Number of top coarse buckets to expand when
         `Choice` has `> 20` options.
       genai_client: Optional pre-initialized `google.genai.Client` (or fake
@@ -91,9 +106,28 @@ class GeminiSystemOneClient:
           "`vertexai=False` (AI Studio Developer API) does not support "
           "`response_logprobs=True`. Please use Vertex AI (`vertexai=True`)."
       )
-    if default_temperature <= 0.0:
+    if mode not in ("logprobs", "monte_carlo"):
       raise ValueError(
-          f"default_temperature must be > 0, got {default_temperature}."
+          f"mode must be 'logprobs' or 'monte_carlo', got {mode!r}."
+      )
+    if not 1 <= monte_carlo_samples <= 8:
+      raise ValueError(
+          "monte_carlo_samples must be between 1 and 8 (Vertex AI "
+          f"candidate_count limit), got {monte_carlo_samples}."
+      )
+    if monte_carlo_smoothing < 0.0:
+      raise ValueError(
+          f"monte_carlo_smoothing must be >= 0, got {monte_carlo_smoothing}."
+      )
+
+    resolved_temp = (
+        default_temperature
+        if default_temperature is not None
+        else (1.0 if mode == "monte_carlo" else 2.0)
+    )
+    if resolved_temp <= 0.0:
+      raise ValueError(
+          f"default_temperature must be > 0, got {resolved_temp}."
       )
     if max_output_tokens < 5:
       raise ValueError(
@@ -104,7 +138,10 @@ class GeminiSystemOneClient:
     self._model = model
     self._project = project
     self._location = location
-    self._default_temperature = default_temperature
+    self._mode: Literal["logprobs", "monte_carlo"] = mode
+    self._monte_carlo_samples = monte_carlo_samples
+    self._monte_carlo_smoothing = monte_carlo_smoothing
+    self._default_temperature = resolved_temp
     self._min_mass_threshold = min_mass_threshold
     self._max_output_tokens = max_output_tokens
     self._system_instruction = system_instruction
@@ -130,17 +167,48 @@ class GeminiSystemOneClient:
     return self._model
 
   @property
+  def mode(self) -> Literal["logprobs", "monte_carlo"]:
+    return self._mode
+
+  @property
   def genai_client(self) -> Any:
     return self._client
 
-  def _build_thinking_config(self) -> Any:
-    """Selects `thinking_budget=0` (2.5) or `thinking_level='MINIMAL'` (3.x)."""
+  def _requires_low_thinking_level(self) -> bool:
+    """Returns True for 3.7/3.8/v4 models where min_thinking_budget=32 (`LOW`)."""
     model_lower = self._model.lower()
-    if "gemini-3" in model_lower or "v4" in model_lower:
+    return any(
+        tag in model_lower
+        for tag in ("gemini-3.7", "gemini-3.8", "gemini-4", "v4")
+    )
+
+  def _build_thinking_config(self) -> Any:
+    """Selects `thinking_budget=0` (2.5), `MINIMAL` (3.0-3.6), or `LOW` (3.7/3.8)."""
+    model_lower = self._model.lower()
+    if self._requires_low_thinking_level():
+      return types.ThinkingConfig(thinking_level="LOW")
+    if "gemini-3" in model_lower:
       return types.ThinkingConfig(thinking_level="MINIMAL")
     return types.ThinkingConfig(thinking_budget=0)
 
   def _build_generate_config(self, symbols: Sequence[str]) -> Any:
+    if self._mode == "monte_carlo":
+      if self._requires_low_thinking_level():
+        eff_max_tokens = max(self._max_output_tokens, 256)
+      elif "gemini-3" in self._model.lower():
+        eff_max_tokens = max(self._max_output_tokens, 16)
+      else:
+        eff_max_tokens = self._max_output_tokens
+      return types.GenerateContentConfig(
+          system_instruction=self._system_instruction,
+          response_mime_type="text/x.enum",
+          response_schema={"type": "STRING", "enum": list(symbols)},
+          candidate_count=self._monte_carlo_samples,
+          temperature=1.0,
+          max_output_tokens=eff_max_tokens,
+          thinking_config=self._build_thinking_config(),
+      )
+
     return types.GenerateContentConfig(
         system_instruction=self._system_instruction,
         response_mime_type="text/x.enum",
@@ -152,6 +220,22 @@ class GeminiSystemOneClient:
         thinking_config=self._build_thinking_config(),
     )
 
+  def _extract_from_response(
+      self, response: Any, symbols: Sequence[str]
+  ) -> ExtractedStepResult:
+    if self._mode == "monte_carlo":
+      return extract_monte_carlo_distribution(
+          response,
+          symbols,
+          smoothing_alpha=self._monte_carlo_smoothing,
+      )
+    return extract_decision_step_distribution(
+        response,
+        symbols,
+        min_mass_threshold=self._min_mass_threshold,
+        allow_text_fallback=self._allow_text_fallback,
+    )
+
   def _invoke_enum_sync(self, compiled: CompiledPrompt) -> ExtractedStepResult:
     config = self._build_generate_config(compiled.symbols)
     response = self._client.models.generate_content(
@@ -159,12 +243,7 @@ class GeminiSystemOneClient:
         contents=compiled.prompt,
         config=config,
     )
-    return extract_decision_step_distribution(
-        response,
-        compiled.symbols,
-        min_mass_threshold=self._min_mass_threshold,
-        allow_text_fallback=self._allow_text_fallback,
-    )
+    return self._extract_from_response(response, compiled.symbols)
 
   async def _invoke_enum_async(
       self, compiled: CompiledPrompt
@@ -187,12 +266,7 @@ class GeminiSystemOneClient:
               config=config,
           ),
       )
-    return extract_decision_step_distribution(
-        response,
-        compiled.symbols,
-        min_mass_threshold=self._min_mass_threshold,
-        allow_text_fallback=self._allow_text_fallback,
-    )
+    return self._extract_from_response(response, compiled.symbols)
 
   # --------------------------------------------------------------------------
   # Post-Extraction Primitive Assemblers

@@ -36,6 +36,7 @@ except ImportError:
       response_schema: Any = None
       response_logprobs: bool | None = None
       logprobs: int | None = None
+      candidate_count: int | None = None
       temperature: float | None = None
       max_output_tokens: int | None = None
       thinking_config: Any = None
@@ -60,6 +61,7 @@ except ImportError:
     @dataclasses.dataclass
     class Part:
       text: str = ""
+      thought: bool | None = None
 
       @classmethod
       def from_text(cls, *, text: str) -> _TypesFallback.Part:
@@ -87,7 +89,11 @@ except ImportError:
             and self.candidates[0].content
             and self.candidates[0].content.parts
         ):
-          return str(self.candidates[0].content.parts[0].text)
+          for part in self.candidates[0].content.parts:
+            if not getattr(part, "thought", False) and getattr(
+                part, "text", None
+            ):
+              return str(part.text)
         return ""
 
   types = _TypesFallback()  # type: ignore[assignment]

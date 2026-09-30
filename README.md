@@ -95,12 +95,33 @@ On Vertex AI (`location="global"` or regional endpoints), two current models sup
 > [!NOTE]
 > **Why `-pro` models (`gemini-2.5-pro`, `gemini-3.1-pro-preview`) are not used**: Vertex AI enforces `thinking_always_on = true` (`thinking_budget >= 128`) on Pro models, rejecting `thinking_budget=0` / `thinking_level="MINIMAL"`. Because they generate internal chain-of-thought tokens prior to emitting the enum token, they act as multi-step "System Two" reasoners rather than single-step "System One" classifiers.
 
-### 2. Using Newer Gemini 3.x Models (`3.5`, `3.7`, `3.8`)
+### 2. Using Newer Gemini 3.x Models (`3.5`, `3.7`, `3.8`) via `mode="monte_carlo"`
 
-Enabling GCP projects for logprobs is not supported yet for Gemini 3 models.
+Because Vertex AI restricts `response_logprobs=True` on Gemini 3.x models to internal research allowlists, `GeminiSystemOneClient` provides **`mode="monte_carlo"`**, which uses single-RPC multi-candidate enum sampling (`candidate_count=8`, `temperature=1.0`, `response_mime_type="text/x.enum"`) to estimate calibrated distributions for `Noul`, `Choice`, and `Score` on **any GCP project without allowlisting**:
+
+| Model ID | Recommended Mode | Thinking Configuration (Auto-Selected) |
+| :--- | :--- | :--- |
+| **`gemini-3.5-flash-lite`** | `mode="monte_carlo"` | `thinking_level="MINIMAL"`, `max_output_tokens=16` |
+| **`gemini-3.5-flash`** | `mode="monte_carlo"` | `thinking_level="MINIMAL"`, `max_output_tokens=16` |
+| **`gemini-3.7-flash`** | `mode="monte_carlo"` | `thinking_level="LOW"`, `max_output_tokens=256` |
+| **`gemini-3.8-flash`** | `mode="monte_carlo"` | `thinking_level="LOW"`, `max_output_tokens=256` |
+
+```python
+from jev_gemini import GeminiSystemOneClient, Noul, Choice, Score
+
+mc_client = GeminiSystemOneClient(
+    model="gemini-3.8-flash",
+    project="your-gcp-project",
+    location="global",
+    mode="monte_carlo",        # Uses candidate_count=8 single-RPC empirical sampling
+    monte_carlo_samples=8,     # Up to 8 independent enum draws per RPC
+    monte_carlo_smoothing=0.0, # Optional Dirichlet/Jeffreys smoothing prior
+)
+```
 
 ## Running Unit Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
+

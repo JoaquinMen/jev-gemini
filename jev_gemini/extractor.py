@@ -187,3 +187,100 @@ def extract_decision_step_distribution(
       unobserved_symbols=unobserved,
       is_degraded_fallback=False,
   )
+
+
+def _extract_candidate_enum_symbol(cand: Any) -> tuple[str, int]:
+  """Extracts `(normalized_symbol, thought_parts_stripped)` from a candidate."""
+  content = getattr(cand, "content", None)
+  parts = getattr(content, "parts", None) or []
+  thought_parts = sum(1 for p in parts if getattr(p, "thought", False))
+  for part in reversed(parts):
+    if getattr(part, "thought", False):
+      continue
+    raw_text = getattr(part, "text", None) or ""
+    if CTRL95_END_THOUGHT in raw_text:
+      raw_text = raw_text.split(CTRL95_END_THOUGHT)[-1]
+      thought_parts += 1
+    norm = normalize_token(raw_text)
+    if norm:
+      return norm, thought_parts
+  return "", thought_parts
+
+
+def extract_monte_carlo_distribution(
+    response: Any,
+    valid_symbols: Sequence[str],
+    *,
+    smoothing_alpha: float = 0.0,
+) -> ExtractedStepResult:
+  """Extracts empirical probabilities over `valid_symbols` across `candidates`.
+
+  Used when `mode="monte_carlo"` (`candidate_count=N` with `text/x.enum`) on
+  models where `response_logprobs=True` is restricted (e.g., Gemini 3.5, 3.7,
+  and 3.8 on standard GCP projects).
+
+  Args:
+    response: A `google.genai.types.GenerateContentResponse` with `N`
+      candidates.
+    valid_symbols: Ordered sequence of expected single-letter symbols (e.g.,
+      `["A", "B", "C"]`).
+    smoothing_alpha: Non-negative Dirichlet/Jeffreys prior `alpha >= 0.0` added
+      to each symbol count (`(count + alpha) / (N_valid + K * alpha)`).
+
+  Returns:
+    An `ExtractedStepResult` with empirical symbol probabilities and
+    diagnostics (`total_decoding_steps` = total candidates returned,
+    `matched_enum_mass` = fraction of candidates matching `valid_symbols`).
+
+  Raises:
+    ValueError: If `smoothing_alpha < 0`.
+    MissingLogprobsError: If `response.candidates` is empty or zero candidates
+      matched `valid_symbols`.
+  """
+  if smoothing_alpha < 0.0:
+    raise ValueError(f"smoothing_alpha must be >= 0, got {smoothing_alpha}.")
+
+  valid_set = set(valid_symbols)
+  candidates = getattr(response, "candidates", None) or []
+  if not candidates:
+    raise MissingLogprobsError(
+        "Response contains no `candidates` for Monte Carlo extraction."
+    )
+
+  counts: dict[str, int] = {sym: 0 for sym in valid_symbols}
+  matched_candidates = 0
+  total_thought_parts = 0
+  for cand in candidates:
+    sym, thought_parts = _extract_candidate_enum_symbol(cand)
+    total_thought_parts += thought_parts
+    if sym in valid_set:
+      counts[sym] += 1
+      matched_candidates += 1
+
+  total_candidates = len(candidates)
+  if matched_candidates == 0:
+    finish_reasons = [getattr(c, "finish_reason", None) for c in candidates]
+    raise MissingLogprobsError(
+        f"Zero out of {total_candidates} Monte Carlo candidates matched valid "
+        f"enum symbols {list(valid_symbols)} (finish_reasons={finish_reasons})."
+    )
+
+  k_count = len(valid_symbols)
+  denom = float(matched_candidates) + (k_count * smoothing_alpha)
+  probs = {
+      sym: (float(counts[sym]) + smoothing_alpha) / denom
+      for sym in valid_symbols
+  }
+  unobserved = [sym for sym in valid_symbols if counts[sym] == 0]
+  matched_mass = float(matched_candidates) / float(total_candidates)
+
+  return ExtractedStepResult(
+      symbol_linear_probs=probs,
+      selected_step_index=0,
+      total_decoding_steps=total_candidates,
+      thought_tokens_stripped=total_thought_parts,
+      matched_enum_mass=matched_mass,
+      unobserved_symbols=unobserved,
+      is_degraded_fallback=False,
+  )
+
