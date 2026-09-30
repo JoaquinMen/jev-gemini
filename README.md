@@ -10,9 +10,9 @@
 
 ## Quickstart
 
-### 1. Run the Pure `google-genai` Demo (`demo_genai.py`)
+### 1. Run the `google-genai` Demo (`demo_genai.py`)
 
-No LangChain required! You can run `demo_genai.py` immediately in simulated mode (no GCP credentials required) or against live Vertex AI:
+ You can run `demo_genai.py` immediately in simulated mode (no GCP credentials required) or against live Vertex AI:
 
 ```bash
 # Simulated mode (deterministic LogprobsResult fixtures):
