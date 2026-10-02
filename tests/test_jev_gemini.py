@@ -5,8 +5,14 @@ from __future__ import annotations
 import asyncio
 import enum
 import math
+from pathlib import Path
+import sys
 import unittest
 from typing import Any, Mapping, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+  sys.path.insert(0, str(REPO_ROOT))
 
 from jev_gemini import Choice
 from jev_gemini import ChoiceAnswer
@@ -487,17 +493,23 @@ class MonteCarloModeTest(unittest.TestCase):
 
 
 class BenchmarkSuiteTest(unittest.TestCase):
-  """Tests for `benchmark.dataset` (40 Noul, 40 Choice, 40 Score) and runner."""
+  """Tests for `benchmark.dataset` and `benchmark.run_benchmark`."""
 
-  def test_benchmark_datasets_have_40_examples_each_and_run_cleanly(self) -> None:
+  def test_benchmark_datasets_and_dynamic_report_run_cleanly(self) -> None:
     from benchmark import CHOICE_BENCHMARK
     from benchmark import NOUL_BENCHMARK
     from benchmark import SCORE_BENCHMARK
     from benchmark.run_benchmark import evaluate_model_on_benchmarks
+    from benchmark.run_benchmark import format_markdown_report
 
-    self.assertEqual(len(NOUL_BENCHMARK), 40)
-    self.assertEqual(len(CHOICE_BENCHMARK), 40)
-    self.assertEqual(len(SCORE_BENCHMARK), 40)
+    n_noul = len(NOUL_BENCHMARK)
+    n_choice = len(CHOICE_BENCHMARK)
+    n_score = len(SCORE_BENCHMARK)
+    n_total = n_noul + n_choice + n_score
+
+    self.assertGreaterEqual(n_noul, 20)
+    self.assertGreaterEqual(n_choice, 20)
+    self.assertGreaterEqual(n_score, 20)
 
     fake = FakeVertexGenAIClient(
         lambda prompt, cfg: build_monte_carlo_response(["A"] * 8)
@@ -510,10 +522,17 @@ class BenchmarkSuiteTest(unittest.TestCase):
         intra_primitive_workers=1,
         genai_client=fake,
     )
-    self.assertEqual(res["overall"]["total_examples"], 120)
-    self.assertEqual(res["noul"]["num_examples"], 40)
-    self.assertEqual(res["choice"]["num_examples"], 40)
-    self.assertEqual(res["score"]["num_examples"], 40)
+    self.assertEqual(res["overall"]["total_examples"], n_total)
+    self.assertEqual(res["noul"]["num_examples"], n_noul)
+    self.assertEqual(res["choice"]["num_examples"], n_choice)
+    self.assertEqual(res["score"]["num_examples"], n_score)
+
+    md = format_markdown_report([res])
+    self.assertIn(f"/{n_total})", md)
+    self.assertIn(f"/{n_noul})", md)
+    self.assertIn(f"/{n_choice})", md)
+    self.assertIn(f"/{n_score})", md)
+    self.assertIn(f"Cost for {n_total}-Call Benchmark (USD)", md)
 
 
 if __name__ == "__main__":

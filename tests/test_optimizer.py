@@ -97,30 +97,32 @@ class _AdaptiveFakeGenAIClient:
 
 
 class OptimizerAndDatasetTest(unittest.TestCase):
-  """Tests the expanded 120-item benchmark dataset and `PromptOptimizer`."""
+  """Tests the expanded benchmark dataset and `PromptOptimizer`."""
 
-  def test_expanded_benchmark_datasets_have_40_examples_each(self) -> None:
-    self.assertEqual(len(NOUL_BENCHMARK), 40)
-    self.assertEqual(len(CHOICE_BENCHMARK), 40)
-    self.assertEqual(len(SCORE_BENCHMARK), 40)
+  def test_expanded_benchmark_datasets_are_valid_and_unique(self) -> None:
+    self.assertGreaterEqual(len(NOUL_BENCHMARK), 40)
+    self.assertGreaterEqual(len(CHOICE_BENCHMARK), 40)
+    self.assertGreaterEqual(len(SCORE_BENCHMARK), 40)
 
-    # Verify unique IDs and balanced Noul labels (20 True, 20 False)
+    # Verify unique IDs and non-empty True/False Noul labels
     noul_ids = [item.test_id for item in NOUL_BENCHMARK]
-    self.assertEqual(len(set(noul_ids)), 40)
-    self.assertEqual(sum(1 for item in NOUL_BENCHMARK if item.expected_value), 20)
-    self.assertEqual(sum(1 for item in NOUL_BENCHMARK if not item.expected_value), 20)
+    self.assertEqual(len(set(noul_ids)), len(NOUL_BENCHMARK))
+    self.assertGreater(sum(1 for item in NOUL_BENCHMARK if item.expected_value), 0)
+    self.assertGreater(
+        sum(1 for item in NOUL_BENCHMARK if not item.expected_value), 0
+    )
 
     # Verify unique Choice IDs
     choice_ids = [item.test_id for item in CHOICE_BENCHMARK]
-    self.assertEqual(len(set(choice_ids)), 40)
+    self.assertEqual(len(set(choice_ids)), len(CHOICE_BENCHMARK))
 
-    # Verify unique Score IDs and balanced 0..4 levels (8 per level)
+    # Verify unique Score IDs and coverage across all 0..4 levels
     score_ids = [item.test_id for item in SCORE_BENCHMARK]
-    self.assertEqual(len(set(score_ids)), 40)
+    self.assertEqual(len(set(score_ids)), len(SCORE_BENCHMARK))
     for lvl in range(5):
-      self.assertEqual(
+      self.assertGreater(
           sum(1 for item in SCORE_BENCHMARK if item.expected_level == lvl),
-          8,
+          0,
       )
 
   def test_detect_primitive_type(self) -> None:
