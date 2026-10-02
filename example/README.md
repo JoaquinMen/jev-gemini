@@ -1,12 +1,13 @@
-# `jev-gemini` Single-Primitive Examples (`Noul`, `Choice`, `Score`)
+# `jev-gemini` Single-Primitive Examples (`Noul`, `Choice`, `Score`) & Prompt Optimizer
 
-This directory demonstrates how `jev-gemini` compiles prompts, configures single-token enum decoding on Vertex AI, and computes calibrated outputs for **one single benchmark example per primitive** from [`benchmark/dataset.py`](../benchmark/dataset.py):
+This directory demonstrates how `jev-gemini` compiles prompts, configures single-token enum decoding on Vertex AI, computes calibrated outputs for **one single benchmark example per primitive** from [`benchmark/dataset.py`](../benchmark/dataset.py), and optimizes primitive wording live over $N$ explorations:
 
-| Primitive | Benchmark Case ID | Domain / Category | Detailed Single-Primitive Guide |
+| Primitive / Tool | Benchmark Case ID | Domain / Category | Detailed Guide / Script |
 | :--- | :--- | :--- | :--- |
 | **`Noul`** *(Binary Proposition)* | `noul_01` | `security_guardrail` (Prompt Injection Detection) | [`example/noul/README.md`](./noul/README.md) |
 | **`Choice`** *(Categorical Routing)* | `choice_01` | `support_routing` (Cloud Support Ticket Triage) | [`example/choice/README.md`](./choice/README.md) |
 | **`Score`** *(Ordinal Rubric `0..4`)* | `score_05` | `incident_severity` (Operational Severity Scoring) | [`example/score/README.md`](./score/README.md) |
+| **`optimize_primitive`** *(Prompt & Criteria Optimizer)* | `noul_17, 18, 37, 38` | `code_safety` (SQL Injection Disambiguation, 10 Explorations) | [`example/optimize_prompt_demo.py`](./optimize_prompt_demo.py) ([Section 4](#4-reflective-prompt--criteria-wording-optimizer-exampleoptimize_prompt_demopy)) |
 
 ---
 
@@ -339,3 +340,79 @@ Select the single best letter (A, B, C, D, E):
 - **`is_bimodal`**: `False` (mass is concentrated on adjacent levels `0` and `1`, not split across non-adjacent extremes)
 
 ---
+
+## 4. Reflective Prompt & Criteria Wording Optimizer (`example/optimize_prompt_demo.py`)
+
+`jev-gemini` includes a lightweight, GEPA-inspired **Reflective Prompt & Criteria Wording Optimizer** ([`jev_gemini/optimizer.py`](../jev_gemini/optimizer.py)) that automatically detects whether a primitive is `Noul`, `Choice`, or `Score` and iteratively refines its `question` and option/criteria descriptions over `num_explorations` iterations using Brier-error failure mining (`1.0 - Brier`) and Pareto frontier branching.
+
+### 4.1 Python Setup & CLI Usage (`optimize_prompt_demo.py`)
+
+```bash
+# Run 10 live explorations on Vertex AI (defaults: project=flex-hr-chatbot, location=global, model=gemini-2.5-flash-lite, mode=logprobs, primitive=noul, category=code_safety, explorations=10):
+python3 example/optimize_prompt_demo.py
+```
+
+Or invoke `optimize_primitive` directly in Python:
+
+```python
+from benchmark.dataset import NOUL_BENCHMARK
+from jev_gemini import GeminiSystemOneClient, Noul, optimize_primitive
+
+client = GeminiSystemOneClient(
+    model="gemini-2.5-flash-lite",
+    project="flex-hr-chatbot",
+    location="global",
+    mode="logprobs",
+)
+
+# Start with a concise baseline Noul primitive
+initial_noul = Noul(
+    question="Is this database query vulnerable to SQL injection?"
+)
+
+# Run 10 reflective wording explorations on the code_safety benchmark examples
+result = optimize_primitive(
+    client=client,
+    primitive=initial_noul,
+    dataset=NOUL_BENCHMARK,
+    category="code_safety",
+    num_explorations=10,
+    proposer_model="gemini-2.5-flash",
+    verbose=True,
+)
+
+print(result.summary_markdown())
+optimized_noul = result.best_primitive
+```
+
+### 4.2 Real Live Output (`gemini-2.5-flash-lite`, `logprobs`, `Noul`, `code_safety`, `10` Explorations)
+
+On the 4 `code_safety` SQL injection examples in [`benchmark/dataset.py`](../benchmark/dataset.py) (`noul_17`, `noul_18`, `noul_37`, `noul_38`), `gemini-2.5-flash-lite` initially misclassifies `noul_38` (a safe SQLAlchemy `text()` query using `:uname` bound parameters alongside an unrelated legacy comment) with `P(True) = 0.9776` (`75.0%` accuracy, `0.2427` Brier error). Over 10 explorations, `optimize_primitive` discovers `Candidate 10 ★`, achieving **`100.0%` accuracy (4/4)** and reducing Brier error by **99.8%** (`0.2427 -> 0.0004`):
+
+| Candidate | Parent | Strategy | Brier Error (↓) | GEPA Score `1-Brier` (↑) | Accuracy (↑) | Corrected / Introduced | Proposer Rationale |
+| :---: | :---: | :--- | :---: | :---: | :---: | :---: | :--- |
+| `0` | `None` | `baseline` | `0.2427` | `0.7573` | `75.0%` (3/4) | `+0 / -0` | Baseline wording (`"Is this database query vulnerable to SQL injection?"`) |
+| `1` | `0` | `false_positive_exclusion` | `0.1934` | `0.8066` | `75.0%` (3/4) | `+1 / -1` | Clarified that parameterized queries prevent SQL injection, distinguishing safe parameterization from unsafe string formatting. |
+| `2` | `0` | `necessary_elements_checklist` | `0.2261` | `0.7739` | `75.0%` (3/4) | `+0 / -0` | Clarified that vulnerability requires user-controlled input directly concatenated into the SQL query without proper sanitization or parameterized queries. |
+| `3` | `1` | `edge_case_disambiguation` | `0.0425` | `0.9575` | `100.0%` (4/4) | `+1 / -0` | Clarified that parameterized queries (using placeholders like `:uname` or `%s`) are safe, even if the user input itself is a variable. |
+| `4` | `1` | `concise_calibration_refinement` | `0.0160` | `0.9840` | `100.0%` (4/4) | `+1 / -0` | Clarified that direct string concatenation or formatting of unescaped user input indicates vulnerability, while parameterized queries indicate safety. |
+| `5` | `4` | `false_positive_exclusion` | `0.0017` | `0.9983` | `100.0%` (4/4) | `+1 / -0` | Explicitly excluded cases where parameterization or secure escaping is used even if string formatting is present in query construction. |
+| `6` | `4` | `necessary_elements_checklist` | `0.2342` | `0.7658` | `75.0%` (3/4) | `+0 / -0` | Alternative checklist phrasing from Parent `4` (automatically pruned in favor of Parent `5`). |
+| `7` | `5` | `edge_case_disambiguation` | `0.0036` | `0.9964` | `100.0%` (4/4) | `+1 / -0` | Distinguished direct concatenation without any secure escaping or parameterization from secure formatting methods. |
+| `8` | `7` | `concise_calibration_refinement` | `0.0209` | `0.9791` | `100.0%` (4/4) | `+1 / -0` | Clarified that direct integration means user input forms part of the SQL structure without safe parameterization. |
+| `9` | `5` | `false_positive_exclusion` | `0.0006` | `0.9994` | `100.0%` (4/4) | `+1 / -0` | Clarified that direct string formatting with user input, even if cast, is vulnerable unless proper escaping/parameterization is used. |
+| **`10` ★** | `5` | `necessary_elements_checklist` | **`0.0004`** | **`0.9996`** | **`100.0%` (4/4)** | **`+1 / -0`** | Refined the checklist to focus strictly on explicit integration of user input into the SQL string and the presence/absence of secure parameterization (`%s`, `:uname`) or escaping mechanisms. |
+
+#### Original (`Candidate 0`) vs. Optimized (`Candidate 10 ★`) Primitive Wording
+
+```diff
+ Noul(
+-    question="Is this database query vulnerable to SQL injection?",
+-    true_description="Yes, the proposition is true and supported by the state.",
+-    false_description="No, the proposition is false or not supported by the state.",
++    question="Is the provided database query vulnerable to SQL injection, based on how user-supplied input is integrated into the query string? Decompose the decision into an explicit checklist of necessary elements that must all be supported by the supplied STATE. Do not extrapolate unstated context.",
++    true_description="The query is vulnerable if the STATE shows that user-supplied input is directly concatenated into the SQL query string, or formatted into it, without evidence of proper escaping or parameterization. This includes cases where the input forms part of the SQL structure.",
++    false_description="The query is not vulnerable if the STATE shows that user-supplied input is passed as parameters to a prepared statement, or an equivalent parameterized query mechanism, or if the input is explicitly and securely escaped before being included in the query string. This applies even if string formatting is used, as long as the input is handled securely (e.g., `cursor.execute(\"SELECT * FROM users WHERE username = %s\", (user_supplied_name,))`). The STATE must explicitly demonstrate these secure practices. Exclude cases where the query itself is safe but the application layer has other vulnerabilities, or the user input is not actually integrated into the query string.",
+ )
+```
+

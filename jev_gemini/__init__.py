@@ -16,6 +16,11 @@ from jev_gemini.extractor import ExtractedStepResult
 from jev_gemini.extractor import MissingLogprobsError
 from jev_gemini.extractor import ThoughtTruncationError
 from jev_gemini.langchain import GeminiJevClassifier
+from jev_gemini.optimizer import CandidateRecord
+from jev_gemini.optimizer import detect_primitive_type
+from jev_gemini.optimizer import optimize_primitive
+from jev_gemini.optimizer import PromptOptimizationResult
+from jev_gemini.optimizer import PromptOptimizer
 from jev_gemini.primitives import Choice
 from jev_gemini.primitives import JSONContent
 from jev_gemini.primitives import Noul
@@ -31,6 +36,7 @@ from jev_gemini.responses import SystemOneResponse
 __all__ = [
     "Answer",
     "CalibrationResult",
+    "CandidateRecord",
     "Choice",
     "ChoiceAnswer",
     "ExtractedStepResult",
@@ -40,6 +46,8 @@ __all__ = [
     "MissingLogprobsError",
     "Noul",
     "NoulAnswer",
+    "PromptOptimizationResult",
+    "PromptOptimizer",
     "Question",
     "Score",
     "ScoreAnswer",
@@ -50,10 +58,13 @@ __all__ = [
     "apply_platt_scaling",
     "apply_temperature_scaling",
     "compute_score_metrics",
+    "detect_primitive_type",
     "evaluate_calibration",
     "extract_decision_step_distribution",
     "extract_monte_carlo_distribution",
     "fit_temperature",
     "jensen_shannon_divergence",
     "normalized_shannon_entropy",
+    "optimize_primitive",
 ]
+

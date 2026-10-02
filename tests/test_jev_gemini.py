@@ -487,17 +487,17 @@ class MonteCarloModeTest(unittest.TestCase):
 
 
 class BenchmarkSuiteTest(unittest.TestCase):
-  """Tests for `benchmark.dataset` (20 Noul, 20 Choice, 20 Score) and runner."""
+  """Tests for `benchmark.dataset` (40 Noul, 40 Choice, 40 Score) and runner."""
 
-  def test_benchmark_datasets_have_20_examples_each_and_run_cleanly(self) -> None:
+  def test_benchmark_datasets_have_40_examples_each_and_run_cleanly(self) -> None:
     from benchmark import CHOICE_BENCHMARK
     from benchmark import NOUL_BENCHMARK
     from benchmark import SCORE_BENCHMARK
     from benchmark.run_benchmark import evaluate_model_on_benchmarks
 
-    self.assertEqual(len(NOUL_BENCHMARK), 20)
-    self.assertEqual(len(CHOICE_BENCHMARK), 20)
-    self.assertEqual(len(SCORE_BENCHMARK), 20)
+    self.assertEqual(len(NOUL_BENCHMARK), 40)
+    self.assertEqual(len(CHOICE_BENCHMARK), 40)
+    self.assertEqual(len(SCORE_BENCHMARK), 40)
 
     fake = FakeVertexGenAIClient(
         lambda prompt, cfg: build_monte_carlo_response(["A"] * 8)
@@ -510,11 +510,12 @@ class BenchmarkSuiteTest(unittest.TestCase):
         intra_primitive_workers=1,
         genai_client=fake,
     )
-    self.assertEqual(res["overall"]["total_examples"], 60)
-    self.assertEqual(res["noul"]["num_examples"], 20)
-    self.assertEqual(res["choice"]["num_examples"], 20)
-    self.assertEqual(res["score"]["num_examples"], 20)
+    self.assertEqual(res["overall"]["total_examples"], 120)
+    self.assertEqual(res["noul"]["num_examples"], 40)
+    self.assertEqual(res["choice"]["num_examples"], 40)
+    self.assertEqual(res["score"]["num_examples"], 40)
 
 
 if __name__ == "__main__":
   unittest.main()
+
