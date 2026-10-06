@@ -40,7 +40,7 @@ print(compiled.prompt)
 # 3. Evaluate on Vertex AI (mode="logprobs" on Gemini 2.5 or mode="monte_carlo" on Gemini 3.x)
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )

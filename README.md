@@ -98,7 +98,7 @@ from jev_gemini import GeminiSystemOneClient, Noul, optimize_primitive
 
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash-lite",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )

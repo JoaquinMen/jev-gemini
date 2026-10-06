@@ -32,9 +32,9 @@ from jev_gemini import ChoiceAnswer, GeminiSystemOneClient, NoulAnswer, ScoreAns
 from jev_gemini._types_compat import HAS_GOOGLE_GENAI, types
 
 DEFAULT_MODELS: list[tuple[str, Literal["logprobs", "monte_carlo"]]] = [
-    ("gemini-2.5-flash-lite", "logprobs"),
+    # ("gemini-2.5-flash-lite", "logprobs"),
     # ("gemini-2.5-flash", "logprobs"),
-    # ("gemini-3.5-flash-lite", "monte_carlo"),
+    ("gemini-3.5-flash-lite", "monte_carlo"),
     # ("gemini-3.7-flash", "monte_carlo"),
     # ("gemini-3.8-flash", "monte_carlo"),
 ]
@@ -42,10 +42,10 @@ DEFAULT_MODELS: list[tuple[str, Literal["logprobs", "monte_carlo"]]] = [
 # Official Standard On-Demand pricing (USD per 1M tokens) and average billed
 # token profile per call (`(input_price, output_price, avg_in_tok, avg_out_tok)`).
 MODEL_PRICING_PROFILE: dict[str, tuple[float, float, float, float]] = {
-    "gemini-2.5-flash-lite": (0.10, 0.40, 199.3, 1.0),
-    #  "gemini-2.5-flash": (0.30, 2.50, 199.3, 1.0),
-    #  "gemini-3.5-flash-lite": (0.30, 2.50, 201.0, 8.0),
-    #  "gemini-3.5-flash": (1.50, 9.00, 201.0, 8.0),
+    # "gemini-2.5-flash-lite": (0.10, 0.40, 199.3, 1.0),
+    # "gemini-2.5-flash": (0.30, 2.50, 199.3, 1.0),
+    "gemini-3.5-flash-lite": (0.30, 2.50, 201.0, 8.0),
+    # "gemini-3.5-flash": (1.50, 9.00, 201.0, 8.0),
     # "gemini-3.8-flash": (0.75, 3.75, 201.0, 397.3),
 }
 
@@ -486,7 +486,7 @@ def format_markdown_report(results: list[dict[str, Any]]) -> str:
           "Each primitive (`Noul`, `Choice`, `Score`) was evaluated independently "
           f"one primitive at a time ({n_noul} `Noul`, {n_choice} `Choice`, and {n_score} "
           f"`Score` cases — {n_total} total single-primitive evaluations per model) "
-          "on Vertex AI (`project=\"flex-hr-chatbot\"`, `location=\"global\"`)."
+          "on Vertex AI (`project=\"your-gcp-project\"`, `location=\"global\"`)."
       ),
       "",
       f"## 1. Overall Model Comparison ({n_total} Single-Primitive Evaluations per Model)",
@@ -600,10 +600,10 @@ def format_markdown_report(results: list[dict[str, Any]]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run jev_gemini benchmark suite.")
-    parser.add_argument("--project", default="flex-hr-chatbot", help="GCP project ID.")
+    parser.add_argument("--project", default="your-gcp-project", help="GCP project ID.")
     parser.add_argument(
-        "--location", default="us-central1", help="Vertex AI location."
-    )  # global should be the default
+        "--location", default="global", help="Vertex AI location."
+    )  # global should be the default for gemini 3 models
     parser.add_argument(
         "--intra-workers",
         type=int,

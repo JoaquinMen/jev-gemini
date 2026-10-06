@@ -81,7 +81,7 @@ print(compiled.prompt)
 # 3. Evaluate the single primitive on Vertex AI
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )
@@ -168,7 +168,7 @@ print(compiled.prompt)
 # 3. Evaluate the single primitive on Vertex AI
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )
@@ -267,7 +267,7 @@ print(compiled.prompt)
 # 3. Evaluate the single primitive on Vertex AI
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )
@@ -348,7 +348,7 @@ Select the single best letter (A, B, C, D, E):
 ### 4.1 Python Setup & CLI Usage (`optimize_prompt_demo.py`)
 
 ```bash
-# Run 10 live explorations on Vertex AI (defaults: project=flex-hr-chatbot, location=global, model=gemini-2.5-flash-lite, mode=logprobs, primitive=noul, category=code_safety, explorations=10):
+# Run 10 live explorations on Vertex AI (defaults: project=your-gcp-project, location=global, model=gemini-2.5-flash-lite, mode=logprobs, primitive=noul, category=code_safety, explorations=10):
 python3 example/optimize_prompt_demo.py
 ```
 
@@ -360,7 +360,7 @@ from jev_gemini import GeminiSystemOneClient, Noul, optimize_primitive
 
 client = GeminiSystemOneClient(
     model="gemini-2.5-flash-lite",
-    project="flex-hr-chatbot",
+    project="your-gcp-project",
     location="global",
     mode="logprobs",
 )

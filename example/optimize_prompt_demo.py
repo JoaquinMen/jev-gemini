@@ -1,11 +1,11 @@
 """Live Vertex AI demo script showing how to optimize a `Noul`, `Choice`, or `Score` prompt over N explorations.
 
 Usage:
-  # Run with default real Vertex AI parameters (flex-hr-chatbot, global, gemini-2.5-flash-lite, logprobs, noul, code_safety, 10 explorations):
+  # Run with default real Vertex AI parameters (your-gcp-project, global, gemini-2.5-flash-lite, logprobs, noul, code_safety, 10 explorations):
   python3 example/optimize_prompt_demo.py
 
   # Or customize CLI arguments:
-  python3 example/optimize_prompt_demo.py --project=flex-hr-chatbot --location=global --model=gemini-2.5-flash-lite --mode=logprobs --primitive=noul --category=code_safety --explorations=10
+  python3 example/optimize_prompt_demo.py --project=your-gcp-project --location=global --model=gemini-2.5-flash-lite --mode=logprobs --primitive=noul --category=code_safety --explorations=10
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ def main() -> None:
   )
   parser.add_argument(
       "--project",
-      default="flex-hr-chatbot",
-      help="GCP project ID for Vertex AI (default: flex-hr-chatbot).",
+      default="your-gcp-project",
+      help="GCP project ID for Vertex AI (default: your-gcp-project).",
   )
   parser.add_argument(
       "--location",
@@ -93,19 +93,24 @@ def main() -> None:
   if args.primitive == "noul":
     dataset = NOUL_BENCHMARK
     category = args.category
-    primitive = (
-        Noul(question="Is this database query vulnerable to SQL injection?")
-        if category == "code_safety"
-        else NOUL_BENCHMARK[0].question
+    primitive = next(
+        (x.question for x in dataset if x.category == category),
+        dataset[0].question,
     )
   elif args.primitive == "choice":
     dataset = CHOICE_BENCHMARK
     category = args.category or "support_routing"
-    primitive = CHOICE_BENCHMARK[0].question
+    primitive = next(
+        (x.question for x in dataset if x.category == category),
+        dataset[0].question,
+    )
   else:
     dataset = SCORE_BENCHMARK
     category = args.category or "incident_severity"
-    primitive = SCORE_BENCHMARK[0].question
+    primitive = next(
+        (x.question for x in dataset if x.category == category),
+        dataset[0].question,
+    )
 
   result = optimize_primitive(
       client=client,

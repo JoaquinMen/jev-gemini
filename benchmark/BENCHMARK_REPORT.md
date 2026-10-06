@@ -8,7 +8,7 @@ We created the [`benchmark/`](./) suite to evaluate **time spent**, **prediction
 - **[`CHOICE_BENCHMARK`](./dataset.py) (`20` `ChoiceTest` examples)**: 4-way categorical routing across Cloud Support (`sre_incident`, `billing_ops`, `iam_security`, `feature_request`), HR Chatbot (`benefits_leave`, `payroll_tax`, `it_equipment`, `performance_career`), E-Commerce Triage (`order_tracking`, `returns_damaged`, `payment_declined`, `account_profile`), and GCP Architecture Selection (`bigquery`, `cloud_spanner`, `cloud_run`, `vertex_ai`).
 - **[`SCORE_BENCHMARK`](./dataset.py) (`20` `ScoreTest` examples)**: 5-level ordinal rubrics (`0..4`, 4 examples per level) across Incident Operational Severity and Customer Frustration / Urgency.
 
-All 5 models were benchmarked live on Vertex AI (`project="flex-hr-chatbot"`, `location="global"`):
+All 5 models were benchmarked live on Vertex AI (`project="your-gcp-project"`, `location="global"`):
 - **Gemini 2.5 (`mode="logprobs"`)**: `gemini-2.5-flash` and `gemini-2.5-flash-lite`
 - **Gemini 3.x (`mode="monte_carlo"`, `candidate_count=8`)**: `gemini-3.5-flash-lite`, `gemini-3.7-flash`, and `gemini-3.8-flash`
 
