@@ -269,7 +269,7 @@ To see how serverless Gemini compares against dedicated decision and diffusion m
 ```mermaid
 xychart-beta
     title "120-Example Benchmark Accuracy (%) Across Architectures"
-    x-axis ["AutoRater Backbone", "Diffusion Model (GPU)", "gemini-2.5-flash-lite (logprobs)", "gemini-3.5-flash-lite (monte_carlo)"]
+    x-axis ["AutoRater", "Diffusion Model", "Gemini 2.5-Lite", "Gemini 3.5-Lite"]
     y-axis "Accuracy (%)" 90 --> 100
     bar [99.2, 98.3, 96.7, 99.2]
 ```
